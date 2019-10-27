@@ -1,6 +1,21 @@
 import torch
 from torch import nn
 
+class LinearNorm(nn.Module):
+    def __init__(self, in_features, out_features, bias, batch_normalization=True, activation=None):
+        super(LinearNorm, self).__init__()
+        self.layers = nn.ModuleList()
+        self.layers.append(nn.Linear(in_features, out_features, bias))
+        if batch_normalization:
+            self.layers.append(nn.BatchNorm1d(out_features))
+        if activation == 'relu':
+            self.layers.append(nn.ReLU())
+        elif activation == 'tanh':
+            self.layers.append(nn.Tanh())
+
+    def forward(self, x):
+        return self.layers(x)
+
 class Conv1DSeq(nn.Module):
     def __init__(self,
                  in_channels_list,
