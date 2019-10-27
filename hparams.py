@@ -29,6 +29,13 @@ def parse_args(parser):
     training = parser.add_argument_group('training setup')
     training.add_argument('--epochs', type=int, required=True,
                           help='Number of total epochs to run')
+    training.add_argument('--character-embedding-dim', type=int, default=512,
+                          help='Embedding dimension for Character Embedding layer')
+
+    # preprocessor
+    preprocessor = parser.add_argument_group('preprocessor configuration')
+    preprocessor.add_argument('--max_input_text_length', type=int, default=128,
+                              help='Maximum number of characters in input text. Control 2nd dimension of tensor \'input_text\'')
 
     # optimization
     optimization = parser.add_argument_group('optimization setup')
