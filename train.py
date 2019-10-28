@@ -4,6 +4,6 @@ import torch
 import tacotron
 import hparams
 
-def main(args)
+def main(args):
     if args.train == 'train':
         pass
