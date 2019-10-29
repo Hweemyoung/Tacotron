@@ -38,27 +38,30 @@ class LinearNorm(nn.Module):
     def forward(self, x):
         return self.layers(x)
 
-class Conv1DSeq(nn.Module):
+class Conv2DSeq(nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels_list,
                  kernel_size_list,
                  stride_list=1,
+                 dropout_list=.5,
                  batch_normalization_list=True,
                  activation_list='relu'):
-        super(Conv1DSeq, self).__init__()
+        super(Conv2DSeq, self).__init__()
         for arg in [kernel_size_list, stride_list]:
             if type(arg) == int:
                 arg = [arg for i in range(len(out_channels_list))]
+        if type(dropout_list) == float:
+            dropout_list = [dropout_list] * len(out_channels_list)
         if type(batch_normalization_list) == bool:
             batch_normalization_list = [batch_normalization_list] * len(out_channels_list)
         if type(activation_list) == str:
             activation_list = [activation_list] * len(out_channels_list)
 
         self.layers = nn.Sequential([
-            Conv1DNorm(i, o, k, s, padding='SAME', batch_normalization=bn, activation=a)
-            for (i, o, k, s, bn, a)
-            in zip([in_channels]+out_channels_list[:-1], out_channels_list, kernel_size_list, stride_list, batch_normalization_list, activation_list)
+            Conv2DNorm(i, o, k, s, padding='SAME', dropout=d, batch_normalization=bn, activation=a)
+            for (i, o, k, s, d, bn, a)
+            in zip([in_channels]+out_channels_list[:-1], out_channels_list, kernel_size_list, stride_list, dropout_list, batch_normalization_list, activation_list)
         ])
 
     def __len__(self):
@@ -67,13 +70,17 @@ class Conv1DSeq(nn.Module):
     def forward(self, x):
         return self.layers(x)
 
-class Conv1DNorm(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding='SAME', batch_normalization=True, activation=None):
-        super(Conv1DNorm, self).__init__()
+class Conv2DNorm(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding='SAME', dropout=.5, batch_normalization=True, activation=None):
+        super(Conv2DNorm, self).__init__()
+        if type(kernel_size) == int:
+            kernel_size = [kernel_size, 1]
         if padding == 'SAME':
-            padding # calculate
+            padding = (kernel_size[0]-1)//2
         self.layers = nn.ModuleList()
-        self.layers.append(nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding))
+        self.layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
+        if dropout:
+            self.layers.append(nn.Dropout2d(p=dropout))
         if batch_normalization:
             self.layers.append(nn.BatchNorm2d(out_channels))
         if activation:
