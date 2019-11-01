@@ -203,6 +203,7 @@ class Decoder(nn.Module):
                  decoder_postnet_stride_list=1,
                  decoder_postnet_batch_normalization_list=True,
                  decoder_postnet_activation_list=['tanh', 'tanh', 'tanh', 'tanh', None],
+                 max_output_time_length=1024,
                  num_mel_channels=80
                  ):
         super(Decoder, self).__init__()
@@ -272,7 +273,7 @@ class Decoder(nn.Module):
         #1.Prenet
         self.frame_prev = self.prenet(self.frame_prev) #Size([batch_size, decoder_prenet_in_features])
         #2.LSTMs
-        context_vector = context_vector[:, -1, :].squeeze()  # Use context from last layer
+        context_vector = context_vector[:, -1, :].squeeze()  # Use context from final layer
         _input = torch.cat([self.frame_prev, context_vector], dim=1) #Size([batch_size, encoder_rnn_units+decoder_prenet_in_features])
         (self.h_prev_0, self.c_prev_0) = self.lstm_cell_0(_input, (self.h_prev_0, self.c_prev_0))
         (self.h_prev_1, self.c_prev_1) = self.lstm_cell_1(self.h_prev_0, self.h_prev_1, self.c_prev_1)
@@ -287,7 +288,10 @@ class Decoder(nn.Module):
         self.spectrogram_pred[:, self.decoder_time_step, :] = _frame_curr
         self.decoder_time_step += 1
         #6.Linear projection for stop token
-        self.linear_projection_stop(_input)
+        _stop_token = self.linear_projection_stop(_input)
+
+        return self.frame_prev, _stop_token
+
 
 
 

@@ -3,7 +3,7 @@
   <component name="ChangeListManager">
     <list default="true" id="0756d3e5-184e-4524-88b4-46ca0cf5732e" name="Default Changelist" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/common/layers.py" beforeDir="false" afterPath="$PROJECT_DIR$/common/layers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tacotron/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tacotron/modules.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/modules.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/train.py" beforeDir="false" afterPath="$PROJECT_DIR$/train.py" afterDir="false" />
     </list>

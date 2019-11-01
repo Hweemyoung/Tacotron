@@ -1,7 +1,8 @@
 import numpy
 import torch
 
-import tacotron
+import tacotron.modules, tacotron.models
+import common.layers
 import hparams
 
 def train(model,num_epochs):
@@ -14,5 +15,3 @@ def train(model,num_epochs):
         print('Epoch{}/{}'.format(epoch, num_epochs))
 
 def main(args):
-    if args.train == 'train':
-        pass
