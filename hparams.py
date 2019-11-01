@@ -34,7 +34,7 @@ def parse_args(parser):
 
     # preprocessor
     preprocessor = parser.add_argument_group('preprocessor configuration')
-    preprocessor.add_argument('--max_input_text_length', type=int, default=128,
+    preprocessor.add_argument('--num_embeddings', type=int, default=128,
                               help='Maximum number of characters in input text. Control 2nd dimension of tensor \'input_text\'')
 
     # optimization

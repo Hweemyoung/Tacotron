@@ -17,7 +17,7 @@ class Tacotron2(nn.Module):
             self.decoder
         ])
 
-    def train(self, criterion, optimizer, num_epochs=100):
+    def train(self, dataloaders_dict, criterion, optimizer, num_epochs=100):
         # 1. set device
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         print('device:', device)

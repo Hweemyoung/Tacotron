@@ -5,13 +5,9 @@ import tacotron.modules, tacotron.models
 import common.layers
 import hparams
 
-def train(model,num_epochs):
-    # 1. set device
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    # 2. model to device
-    model.to(device)
-    # 3. loop over epoch
-    for epoch in range(num_epochs):
-        print('Epoch{}/{}'.format(epoch, num_epochs))
+
+def train(model, dataloaders_dict, criterion, optimizer, num_epochs=100):
+    model.train(dataloaders_dict, criterion, optimizer, num_epochs=100)
 
 def main(args):
+    pass

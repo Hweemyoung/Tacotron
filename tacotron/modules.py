@@ -7,34 +7,32 @@ import hparams
 
 
 class CharacterEmbedding(nn.Module):
-    def __init__(self, max_input_text_length, embedding_dim, pretrained_embedding=None, initial_weights=None):
+    def __init__(self, num_embeddings, embedding_dim, pretrained_embedding=None, initial_weights=None):
         '''
-        :param max_input_text_length: int
+        :param num_embeddings: int
         :param embedding_dim: int
         :param pretrained_embedding: 2-d LongTensor
         :param initial_weights: 2-d LongTensor
         '''
-
         super(CharacterEmbedding, self).__init__()
         if pretrained_embedding:
             self.character_embedding.from_pretrained(embeddings=pretrained_embedding, freeze=True)
         elif initial_weights:
-            self.character_embedding = nn.Embedding(num_embeddings=max_input_text_length,
+            self.character_embedding = nn.Embedding(num_embeddings=num_embeddings,
                                                     embedding_dim=embedding_dim,
                                                     _weight=initial_weights)
         else:
-            self.character_embedding = nn.Embedding(num_embeddings=max_input_text_length,
+            self.character_embedding = nn.Embedding(num_embeddings=num_embeddings,
                                                     embedding_dim=embedding_dim)
 
-    def forward(self, input_text):
+    def forward(self, input_indices):
         '''
-        :param input_text: 2-d LongTensor of arbitrary shape containing the indices to extract
-            Size([batch_size, max_input_text_length])
+        :param input_indices: 2-d LongTensor of arbitrary shape containing the indices to extract
+            Size([batch_size, max_input_length])
         :return: 3-d LongTensor
-            Size([batch_size, max_input_text_length, embedding_dim])
+            Size([batch_size, max_input_length, embedding_dim])
         '''
-        return self.character_embedding(input_text)
-
+        return self.character_embedding(input_indices)
 
 class ConvLayers(nn.Module):
     def __init__(self, in_channels, out_channels_list, kernel_size_list, stride_list, dropout_list, batch_normalization_list,
@@ -66,30 +64,31 @@ class ARSG(nn.Module):
         """
         :param F_matrix: 2-d Tensor
             Size([input_time_length, dim_f])
-        :param a_prev: Vector. Previous time alignment.
-            Size([input_time_length])
+        :param a_prev: 2-d Tensor. Previous time alignment.
+            Size([batch_size, input_time_length])
         :return f_current: 3-d Tensor.
             Size([batch_size, input_time_length, dim_f])
         """
-        F_matrix = F_matrix.unsqueeze(0).unsqueeze(1) # (num_channels, divided by groups, input_time_length, dim_f)
-        a_prev = a_prev.view(1, 1, -1, 1) # (num_channels, divided by groups, kernel_size, 1)
-        padding = (a_prev.shape[2]-1)//2 # SAME padding # (k-1)/2
+        F_matrix = F_matrix.unsqueeze(0).unsqueeze(1)  # (minibatch,in_channels,iH,iW)
+        a_prev = a_prev.unsqueeze(1).unsqueeze(3)  # (out_channels, in_channel/1, kH,kW)
+        padding = (a_prev.shape[3]-1)//2 # SAME padding # (k-1)/2
         f_current = torch.conv2d(input=F_matrix, weight=a_prev, stride=1, padding=padding)
+        f_current = f_current.squeeze()
         return f_current
 
     def score(self, s_prev, h, f_current):
         """
         :param s_prev: 2-d Tensor.
-            Size([batch_size, dim_s])
+            Size([batch_size, decoder_rnn_units])
         :param h: 3-d Tensor. Encoder output.
-            Size([batch_size, input_time_length, dim_h])
+            Size([batch_size, input_time_length, encoder_output_units])
         :param f_current: 3-d Tensor. Output from calc_f.
             Size([batch_size, input_time_length, dim_f])
         :return e_current: 2-d Tensor.
             Size([batch_size, input_time_length])
         """
 
-        e_current = self.w(torch.tanh(self.W(s_prev)+self.V(h)+self.U(f_current))) #Broadcast s_prev
+        e_current = self.w(torch.tanh(self.W(s_prev).unsqueeze(1)+self.V(h)+self.U(f_current))) #Broadcast s_prev
         e_current = torch.squeeze(e_current)
         assert(e_current.dim() == 2)
         return e_current
@@ -120,9 +119,9 @@ class ARSG(nn.Module):
         return a_current
 
 class LocationSensitiveAttention(nn.Module):
-    def __init__(self, dim_s, dim_h, dim_f, dim_w, F_matrix, max_input_time_length, max_output_time_length, mode='sharpening', beta=1.0):
+    def __init__(self, batch_size, decoder_rnn_units, encoder_output_units, dim_f, dim_w, F_matrix, max_input_time_length, max_output_time_length, mode='sharpening', beta=1.0):
         super(LocationSensitiveAttention, self).__init__()
-        self.ARSG = ARSG(dim_s, dim_h, dim_f, dim_w)
+        self.ARSG = ARSG(decoder_rnn_units, encoder_output_units, dim_f, dim_w)
         self.alignments = torch.zeros([max_input_time_length, max_output_time_length], requires_grad=False) # Preserves alignments history
         self.decoder_time_step = 0
         self.F_matrix = F_matrix
@@ -131,12 +130,16 @@ class LocationSensitiveAttention(nn.Module):
 
         self.h = None
 
+        #Initial alignment
+        self.a_prev = torch.zeros([batch_size, max_input_time_length])
+        self.a_prev[:, 0] = 1
+
     def forward(self, s_prev):
         """
         :param s_prev: 3-d Tensor. Previous decoder hidden states.
             Size([batch_size, decoder_rnn_layers, decoder_rnn_units])
         :return context_vector: 3-d Tensor.
-            Size([batch_size, 2(bidirection), encoder_rnn_units])
+            Size([batch_size, 2(bidirection), encoder_output_units])
         """
         a_current = self.ARSG.forward(self.F_matrix, self.a_prev, s_prev, self.h, self.mode, self.beta)
         context_vector = torch.bmm(a_current.unsqueeze(2).transpose(1, 2), self.h)
@@ -147,18 +150,19 @@ class LocationSensitiveAttention(nn.Module):
 
 class Encoder(nn.Module):
     def __init__(self,
-                 max_input_text_length,
-                 encoder_embedding_dim,
-                 pretrained_embedding,
-                 initial_weights,
-                 encoder_conv_out_channels_list,
-                 encoder_conv_kernel_size_list,
-                 encoder_conv_stride_list,
-                 encoder_conv_batch_normalization_list,
-                 encoder_conv_activation_list,
-                 encoder_rnn_units,
-                 encoder_rnn_layers,
-                 encoder_rnn_dropout
+                 max_input_text_length=100,
+                 encoder_embedding_dim=512,
+                 pretrained_embedding=False,
+                 initial_weights=False,
+                 encoder_conv_out_channels_list=[512, 512, 1],
+                 encoder_conv_kernel_size_list=5,
+                 encoder_conv_stride_list=1,
+                 encoder_conv_dropout_list=.5,
+                 encoder_conv_batch_normalization_list=True,
+                 encoder_conv_activation_list='relu',
+                 encoder_rnn_units=256,
+                 encoder_rnn_layers=1,
+                 encoder_rnn_dropout=.5
                  ):
         super(Encoder, self).__init__()
         self.character_embedding = CharacterEmbedding(max_input_text_length,
@@ -169,19 +173,21 @@ class Encoder(nn.Module):
                                       encoder_conv_out_channels_list,
                                       encoder_conv_kernel_size_list,
                                       encoder_conv_stride_list,
+                                      encoder_conv_dropout_list,
                                       encoder_conv_batch_normalization_list,
                                       encoder_conv_activation_list)
         self.rnn = nn.RNNBase(mode='LSTM',
-                              input_size=encoder_conv_out_channels_list * encoder_embedding_dim,
+                              input_size=encoder_conv_out_channels_list[-1] * encoder_embedding_dim,
                               hidden_size=encoder_rnn_units,
                               num_layers=encoder_rnn_layers,
                               bias=True,
                               dropout=encoder_rnn_dropout,
-                              bidirectional=True) # returns output.size([max_input_text_length, batch_size, 2(bidirection)*hidden_size): stack of output states, h_n.size([2(bidirection)*num_layers, batch_size, hidden_size]): last hidden state
-        self.layers = nn.Sequential([self.character_embedding,
-                                     self.conv_layers,
-                                     self.rnn
-                                     ])
+                              bidirectional=True) # returns output.size([num_embeddings, batch_size, 2(bidirection)*hidden_size): stack of output states, h_n.size([2(bidirection)*num_layers, batch_size, hidden_size]): last hidden state
+        self.layers = nn.Sequential(
+            self.character_embedding,
+            self.conv_layers,
+            self.rnn
+        )
 
     def forward(self, input_text):
         return self.layers(input_text)
@@ -189,7 +195,7 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self,
                  batch_size=32,
-                 encoder_rnn_units=512,
+                 encoder_output_units=512,
                  decoder_rnn_units=1024,
                  decoder_rnn_layers=2,
                  decoder_prenet_in_features=80,
@@ -210,7 +216,7 @@ class Decoder(nn.Module):
         assert(decoder_prenet_in_features == num_mel_channels)
 
         self.lstm_cell_0 = nn.LSTMCell(
-            input_size=encoder_rnn_units+decoder_prenet_in_features,
+            input_size=encoder_output_units + decoder_prenet_in_features,
             hidden_size=decoder_rnn_units,
             bias=True
         )
@@ -222,14 +228,14 @@ class Decoder(nn.Module):
         )
 
         self.linear_projection_mel = LinearNorm(
-            in_features=(encoder_rnn_units+decoder_rnn_units), #Concatenate attention context vector and LSTM output
+            in_features=(encoder_output_units + decoder_rnn_units), #Concatenate attention context vector and LSTM output
             out_features=num_mel_channels,
             bias=True,
             batch_normalization= False,
         )
 
         self.linear_projection_stop = LinearNorm(
-            in_features=(encoder_rnn_units+decoder_rnn_units),
+            in_features=(encoder_output_units + decoder_rnn_units),
             out_features=1,
             bias=True,
             batch_normalization=False,
@@ -266,7 +272,7 @@ class Decoder(nn.Module):
     def _forward(self, context_vector):
         """
         :param context_vector: 3-d Tensor.
-            Size([batch_size, 2(bidirection), encoder_rnn_units])
+            Size([batch_size, 2(bidirection), encoder_output_units])
         :return:
         """
 
@@ -274,7 +280,7 @@ class Decoder(nn.Module):
         self.frame_prev = self.prenet(self.frame_prev) #Size([batch_size, decoder_prenet_in_features])
         #2.LSTMs
         context_vector = context_vector[:, -1, :].squeeze()  # Use context from final layer
-        _input = torch.cat([self.frame_prev, context_vector], dim=1) #Size([batch_size, encoder_rnn_units+decoder_prenet_in_features])
+        _input = torch.cat([self.frame_prev, context_vector], dim=1) #Size([batch_size, encoder_output_units+decoder_prenet_in_features])
         (self.h_prev_0, self.c_prev_0) = self.lstm_cell_0(_input, (self.h_prev_0, self.c_prev_0))
         (self.h_prev_1, self.c_prev_1) = self.lstm_cell_1(self.h_prev_0, self.h_prev_1, self.c_prev_1)
         #3.Linear projection for mel
@@ -292,7 +298,47 @@ class Decoder(nn.Module):
 
         return self.frame_prev, _stop_token
 
+def checkup():
+    #check CharacterEmbedding
+    embedding = CharacterEmbedding(30, 128)
+    batch_size = 32
+    max_input_length = 100
+    input_indices = torch.randint(0,30,[batch_size, max_input_length])
+    character_embeddings = embedding(input_indices)
+    print('character embeddings shape: ', character_embeddings.size())
+
+    #check ConvLayers
+    convlayers = ConvLayers(1, [512,512,1], 5, 1, .5, True, 'relu')
+    character_embeddings = character_embeddings.unsqueeze(1)
+    print('unsqueezed character embeddings shape: ', character_embeddings.size())
+    conv_embeddings = convlayers(character_embeddings)
+    print('conv embeddings shape: ', conv_embeddings.size())
+
+    #chack encoder rnn
+    encoder_rnn = nn.LSTM(
+        input_size=128,
+        hidden_size=256,
+        num_layers=1,
+        bias=True,
+        dropout=.5,
+        bidirectional=True)  # returns output.size([num_embeddings, batch_size, 2(bidirection)*hidden_size): stack of output states, h_n.size([2(bidirection)*num_layers, batch_size, hidden_size]): last hidden state
+    conv_embeddings = conv_embeddings.squeeze().transpose(0, 1) #(max_input_length, batch, input_dim)
+    print('conv embeddings shape: ', conv_embeddings.size())
+    encoder_output, (encoder_h_n, encoder_c_n) = encoder_rnn(conv_embeddings)
+    print('encoder final layer hidden states shape: ', encoder_output.size(),
+          '\t encoder last step hidden states: ', encoder_h_n.size(),
+          '\t encoder last step cell states: ', encoder_c_n.size())
+
+    F_matrix = torch.rand([100, 128])
+    attention = LocationSensitiveAttention(32,1024, 512, 128, 128, F_matrix, 100, 1024)
+    decoder = Decoder()
+    attention.forward(decoder.h_prev_0)
 
 
 
-parser = hparams.parser
+checkup()
+
+
+
+
+#parser = hparams.parser
