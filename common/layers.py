@@ -21,13 +21,27 @@ class LinearSeq(nn.Module):
     def forward(self, x):
         return self.layers(x)
 
+class TransposeNorm(nn.Module):
+    def __init__(self, dim0, dim1):
+        super(TransposeNorm, self).__init__()
+        self.dim0 = dim0
+        self.dim1 = dim1
+
+    def forward(self, x):
+        if max(self.dim0, self.dim1) < x.dim():
+            return x.transpose(self.dim0, self.dim1)
+        else:
+            return x
+
 class LinearNorm(nn.Module):
     def __init__(self, in_features, out_features, bias=True, batch_normalization=True, activation=None):
         super(LinearNorm, self).__init__()
         self.layers = nn.ModuleList()
-        self.layers.append(nn.Linear(in_features, out_features, bias))
+        self.layers.append(nn.Linear(in_features, out_features, bias)) #Returns Size([batch_size(, time length), out_features])
         if batch_normalization:
-            self.layers.append(nn.BatchNorm1d(out_features))
+            self.layers.append(TransposeNorm(1, 2))# Returns Size([batch_size, out_features(, time length)])
+            self.layers.append(nn.BatchNorm1d(out_features))# Returns Size([batch_size, out_features(, time length)])
+            self.layers.append(TransposeNorm(1, 2))# Returns Size([batch_size(, time length), out_features])
         if activation == 'relu':
             self.layers.append(nn.ReLU())
         elif activation == 'tanh':

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.functional
+import torch.nn.functional as F
 
 from common.layers import *
 import hparams
@@ -70,10 +70,16 @@ class ARSG(nn.Module):
             Size([batch_size, input_time_length, dim_f])
         """
         F_matrix = F_matrix.unsqueeze(0).unsqueeze(1)  # (minibatch,in_channels,iH,iW)
+        print('F_matrix shape: ', F_matrix.size())
         a_prev = a_prev.unsqueeze(1).unsqueeze(3)  # (out_channels, in_channel/1, kH,kW)
-        padding = (a_prev.shape[3]-1)//2 # SAME padding # (k-1)/2
-        f_current = torch.conv2d(input=F_matrix, weight=a_prev, stride=1, padding=padding)
+        print('a_prev shape: ', a_prev.size())
+        padding = (a_prev.shape[2]-1)//2 # SAME padding # (k-1)/2
+        f_current = torch.conv2d(input=F_matrix, weight=a_prev, stride=1, padding=[padding, 0]) # (minibatch, out_channels, iH, iW)
+        print('f_current shape: ', f_current.size())
         f_current = f_current.squeeze()
+        if f_current.size()[1] != F_matrix.size()[3]: # if time length shrinked due to padding
+            f_current = F.pad(f_current, [0, 0, 1, 0], mode='constant', value=0)
+        print('f_current reshape: ', f_current.size())
         return f_current
 
     def score(self, s_prev, h, f_current):
@@ -87,9 +93,27 @@ class ARSG(nn.Module):
         :return e_current: 2-d Tensor.
             Size([batch_size, input_time_length])
         """
-
+        '''print('s_prev shape: ', s_prev.size())
+        s_prev = s_prev[:, 1, :] #Use states of final layer only
+        print('s_prev reshape: ', s_prev.size())
+        Ws = self.W(s_prev).unsqueeze(1)
+        print('Ws shape: ', Ws.size())
+        print('h shape: ', h.size())
+        h = h.transpose(0, 1)
+        print('h reshape: ', h.size())
+        Vh = self.V(h)
+        print('Vh shape: ', Vh.size())
+        print('f shape: ', f_current.size())
+        Uf = self.U(f_current)
+        print('Uf shape: ', Uf.size())
+        x = torch.tanh(Ws + Vh + Uf)
+        print('x shape: ', x.size())
+        e_current = self.w(x)
+        print('e shape: ', e_current.size())'''
+        s_prev = s_prev[:, 1, :] #Use decoder final layer states only
+        h = h.transpose(0, 1)
         e_current = self.w(torch.tanh(self.W(s_prev).unsqueeze(1)+self.V(h)+self.U(f_current))) #Broadcast s_prev
-        e_current = torch.squeeze(e_current)
+        e_current = e_current.squeeze()
         assert(e_current.dim() == 2)
         return e_current
 
@@ -141,7 +165,7 @@ class LocationSensitiveAttention(nn.Module):
         :return context_vector: 3-d Tensor.
             Size([batch_size, 2(bidirection), encoder_output_units])
         """
-        a_current = self.ARSG.forward(self.F_matrix, self.a_prev, s_prev, self.h, self.mode, self.beta)
+        a_current = self.ARSG.forward(self.F_matrix, self.a_prev, s_prev, self.h, self.mode, self.beta) # Size([batch, input_time_length])
         context_vector = torch.bmm(a_current.unsqueeze(2).transpose(1, 2), self.h)
         self.alignments[self.decoder_time_step] = a_current # Store alignment
         self.a_prev = a_current
@@ -308,7 +332,7 @@ def checkup():
     print('character embeddings shape: ', character_embeddings.size())
 
     #check ConvLayers
-    convlayers = ConvLayers(1, [512,512,1], 5, 1, .5, True, 'relu')
+    convlayers = ConvLayers(1, [512, 1], 5, 1, .5, True, 'relu')
     character_embeddings = character_embeddings.unsqueeze(1)
     print('unsqueezed character embeddings shape: ', character_embeddings.size())
     conv_embeddings = convlayers(character_embeddings)
@@ -330,8 +354,10 @@ def checkup():
           '\t encoder last step cell states: ', encoder_c_n.size())
 
     F_matrix = torch.rand([100, 128])
-    attention = LocationSensitiveAttention(32,1024, 512, 128, 128, F_matrix, 100, 1024)
+    attention = LocationSensitiveAttention(32, 1024, 512, 128, 128, F_matrix, 100, 1024)
+    attention.h = encoder_output
     decoder = Decoder()
+
     attention.forward(decoder.h_prev_0)
 
 
