@@ -76,7 +76,7 @@ class ARSG(nn.Module):
         padding = (a_prev.shape[2]-1)//2 # SAME padding # (k-1)/2
         f_current = torch.conv2d(input=F_matrix, weight=a_prev, stride=1, padding=[padding, 0]) # (minibatch, out_channels, iH, iW)
         print('f_current shape: ', f_current.size())
-        f_current = f_current.squeeze()
+        f_current = f_current.squeeze(0)
         if f_current.size()[1] != F_matrix.size()[3]: # if time length shrinked due to padding
             f_current = F.pad(f_current, [0, 0, 1, 0], mode='constant', value=0)
         print('f_current reshape: ', f_current.size())
@@ -110,10 +110,9 @@ class ARSG(nn.Module):
         print('x shape: ', x.size())
         e_current = self.w(x)
         print('e shape: ', e_current.size())'''
-        s_prev = s_prev[:, 1, :] #Use decoder final layer states only
         h = h.transpose(0, 1)
         e_current = self.w(torch.tanh(self.W(s_prev).unsqueeze(1)+self.V(h)+self.U(f_current))) #Broadcast s_prev
-        e_current = e_current.squeeze()
+        e_current = e_current.squeeze(2)
         assert(e_current.dim() == 2)
         return e_current
 
@@ -146,29 +145,35 @@ class LocationSensitiveAttention(nn.Module):
     def __init__(self, batch_size, decoder_rnn_units, encoder_output_units, dim_f, dim_w, F_matrix, max_input_time_length, max_output_time_length, mode='sharpening', beta=1.0):
         super(LocationSensitiveAttention, self).__init__()
         self.ARSG = ARSG(decoder_rnn_units, encoder_output_units, dim_f, dim_w)
-        self.alignments = torch.zeros([max_input_time_length, max_output_time_length], requires_grad=False) # Preserves alignments history
+        self.alignments = torch.zeros([batch_size, max_input_time_length, max_output_time_length], requires_grad=False) # Preserves alignments history
         self.decoder_time_step = 0
         self.F_matrix = F_matrix
         self.mode = mode
         self.beta = beta
 
-        self.h = None
+        self.h = None # Initial shape: (input length, batch, encoder_final_layer_output_units)
 
         #Initial alignment
         self.a_prev = torch.zeros([batch_size, max_input_time_length])
         self.a_prev[:, 0] = 1
 
-    def forward(self, s_prev):
+    def forward(self, s_prev, stop_token_cum):
         """
-        :param s_prev: 3-d Tensor. Previous decoder hidden states.
-            Size([batch_size, decoder_rnn_layers, decoder_rnn_units])
-        :return context_vector: 3-d Tensor.
-            Size([batch_size, 2(bidirection), encoder_output_units])
+        :param s_prev: 2-d Tensor. Previous decoder hidden states.
+            Size([batch_size, decoder_rnn_units])
+        :param stop_token_cum: 1-d Tensor. To skip calculation on stopped cases in batch.
+            Size([batch_size]
+        :return context_vector: 2-d Tensor.
+            Size([batch_size, encoder_output_units])
         """
-        a_current = self.ARSG.forward(self.F_matrix, self.a_prev, s_prev, self.h, self.mode, self.beta) # Size([batch, input_time_length])
-        context_vector = torch.bmm(a_current.unsqueeze(2).transpose(1, 2), self.h)
-        self.alignments[self.decoder_time_step] = a_current # Store alignment
-        self.a_prev = a_current
+        h = self.h[:, stop_token_cum, :]
+        s_prev = s_prev[stop_token_cum]
+        a_prev = self.a_prev[stop_token_cum]
+        a_current = self.ARSG.forward(self.F_matrix, a_prev, s_prev, h, self.mode, self.beta) # Size([batch, input_time_length])
+        context_vector = torch.bmm(a_current.unsqueeze(1), h.transpose(0, 1)) # Size([batch, 1, encoder_output_units])
+        context_vector = context_vector.squeeze(1) # Size([batch, encoder_output_units])
+        self.alignments[stop_token_cum, :, self.decoder_time_step] = a_current # Store alignment
+        self.a_prev[stop_token_cum] = a_current
         self.decoder_time_step += 1
         return context_vector
 
@@ -240,7 +245,7 @@ class Decoder(nn.Module):
         assert(decoder_prenet_in_features == num_mel_channels)
 
         self.lstm_cell_0 = nn.LSTMCell(
-            input_size=encoder_output_units + decoder_prenet_in_features,
+            input_size=encoder_output_units + decoder_prenet_out_features_list[-1],
             hidden_size=decoder_rnn_units,
             bias=True
         )
@@ -262,7 +267,7 @@ class Decoder(nn.Module):
             in_features=(encoder_output_units + decoder_rnn_units),
             out_features=1,
             bias=True,
-            batch_normalization=False,
+            batch_normalization=True,
             activation='sigmoid'
         )
 
@@ -283,44 +288,75 @@ class Decoder(nn.Module):
             activation_list=decoder_prenet_activation_list
         )
 
-        # GO-frame
-        self.frame_prev = nn.init.xavier_uniform_(torch.zeros([batch_size, decoder_prenet_in_features])) #Initial go-frame
-        self.h_prev_0 = torch.zeros([batch_size, decoder_rnn_layers, decoder_rnn_units]) #Initial hidden state
-        self.c_prev_0 = torch.zeros([batch_size, decoder_rnn_layers, decoder_rnn_units]) #Initial cell state
-        self.h_prev_1 = torch.zeros([batch_size, decoder_rnn_layers, decoder_rnn_units])  # Initial hidden state
-        self.c_prev_1 = torch.zeros([batch_size, decoder_rnn_layers, decoder_rnn_units])  # Initial cell state
+        # reset
+        self.decoder_prenet_in_features = decoder_prenet_in_features
+        self.decoder_rnn_units = decoder_rnn_units
+        self.max_output_time_length = max_output_time_length
+        self.num_mel_channels = num_mel_channels
+        self.reset(batch_size)
 
-        self.spectrogram_pred = torch.zeros([batch_size, max_output_time_length, num_mel_channels])
-        self.decoder_time_step = 0
-
-    def _forward(self, context_vector):
+    def reset(self, batch_size):
         """
-        :param context_vector: 3-d Tensor.
-            Size([batch_size, 2(bidirection), encoder_output_units])
+        Reset attributes for new batch.
+        :param batch_size:
         :return:
         """
+        self.frame_prev = torch.zeros([batch_size, self.decoder_prenet_in_features])  # Initial go-frame
+        self.h_prev_0 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial hidden state
+        self.c_prev_0 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial cell state
+        self.h_prev_1 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial hidden state
+        self.c_prev_1 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial cell state
 
+        self.spectrogram_pred = torch.zeros([batch_size, self.max_output_time_length, self.num_mel_channels])
+        self.stop_token_cum = torch.ones(batch_size, dtype=torch.uint8)
+        self.decoder_time_step = 0
+
+    def forward(self, context_vector):
+        """
+        :param context_vector: 3-d Tensor.
+            Size([batch_size, encoder_output_units])
+        :return self.frame_prev: 2-d Tensor
+            Size([batch_size, num_mel_channels])
+        :return _stop_token: 1-d Tensor
+            Size([batch_size])
+        """
+        stop_token_cum = self.stop_token_cum
         #1.Prenet
-        self.frame_prev = self.prenet(self.frame_prev) #Size([batch_size, decoder_prenet_in_features])
+        self.frame_prev = self.prenet(self.frame_prev) #Size([batch_size, decoder_prenet_out_features])
         #2.LSTMs
-        context_vector = context_vector[:, -1, :].squeeze()  # Use context from final layer
+        h_prev_0 = self.h_prev_0[stop_token_cum]
+        h_prev_1 = self.h_prev_1[stop_token_cum]
+        c_prev_0 = self.c_prev_0[stop_token_cum]
+        c_prev_1 = self.c_prev_1[stop_token_cum]
         _input = torch.cat([self.frame_prev, context_vector], dim=1) #Size([batch_size, encoder_output_units+decoder_prenet_in_features])
-        (self.h_prev_0, self.c_prev_0) = self.lstm_cell_0(_input, (self.h_prev_0, self.c_prev_0))
-        (self.h_prev_1, self.c_prev_1) = self.lstm_cell_1(self.h_prev_0, self.h_prev_1, self.c_prev_1)
+
+        (h_prev_0, c_prev_0) = self.lstm_cell_0(_input, (h_prev_0, c_prev_0))
+        self.h_prev_0[stop_token_cum] = h_prev_0
+        self.c_prev_0[stop_token_cum] = c_prev_0
+
+        (h_prev_1, c_prev_1) = self.lstm_cell_1(h_prev_0, (h_prev_1, c_prev_1))
+        self.h_prev_1[stop_token_cum] = h_prev_1
+        self.c_prev_1[stop_token_cum] = c_prev_1
+
         #3.Linear projection for mel
-        _input = torch.cat([self.h_prev_1, context_vector], dim=1)
+        _input = torch.cat([h_prev_1, context_vector], dim=1)
         _frame_curr = self.linear_projection_mel(_input) #Size([batch_size, num_mel_channels])
         self.frame_prev = _frame_curr
         #4.Post-Net and add
-        _frame_curr = _frame_curr.unsqueeze(1) #Size([batch_size, 1, num_mel_channels])
-        _frame_curr = _frame_curr+self.postnet(_frame_curr) #Size([batch_size, 1, num_mel_channels])
+        _frame_curr = _frame_curr.unsqueeze(1).unsqueeze(3) #Size([batch_size, 1, num_mel_channels, 1])
+        _frame_curr = _frame_curr+self.postnet(_frame_curr) #Size([batch_size, 1, num_mel_channels, 1])
+        _frame_curr = _frame_curr.squeeze(3).squeeze(1) #Size([batch_size, num_mel_channels])
         #5.Store predicted frame
-        self.spectrogram_pred[:, self.decoder_time_step, :] = _frame_curr
+        self.spectrogram_pred[stop_token_cum, self.decoder_time_step, :] = _frame_curr
         self.decoder_time_step += 1
         #6.Linear projection for stop token
-        _stop_token = self.linear_projection_stop(_input)
-
-        return self.frame_prev, _stop_token
+        _stop_token = self.linear_projection_stop(_input) #Size([batch_size, 1])
+        _stop_token = _stop_token.squeeze(1) #Size([batch_size])
+        _stop_token = _stop_token < .5 # (<0.5) -> valid, (>0.5) -> switch off)
+        #7. Update valid cases for further prediction
+        self.stop_token_cum[self.stop_token_cum == 1] = _stop_token # Update stop token among still valid cases
+        self.frame_prev = self.frame_prev[_stop_token] # Return newly valid cases only
+        return self.h_prev_1, self.stop_token_cum
 
 def checkup():
     #check CharacterEmbedding
@@ -346,8 +382,8 @@ def checkup():
         bias=True,
         dropout=.5,
         bidirectional=True)  # returns output.size([num_embeddings, batch_size, 2(bidirection)*hidden_size): stack of output states, h_n.size([2(bidirection)*num_layers, batch_size, hidden_size]): last hidden state
-    conv_embeddings = conv_embeddings.squeeze().transpose(0, 1) #(max_input_length, batch, input_dim)
-    print('conv embeddings shape: ', conv_embeddings.size())
+    conv_embeddings = conv_embeddings.squeeze(1).transpose(0, 1) #(max_input_length, batch, input_dim)
+    print('conv embeddings reshape: ', conv_embeddings.size())
     encoder_output, (encoder_h_n, encoder_c_n) = encoder_rnn(conv_embeddings)
     print('encoder final layer hidden states shape: ', encoder_output.size(),
           '\t encoder last step hidden states: ', encoder_h_n.size(),
@@ -355,12 +391,17 @@ def checkup():
 
     F_matrix = torch.rand([100, 128])
     attention = LocationSensitiveAttention(32, 1024, 512, 128, 128, F_matrix, 100, 1024)
-    attention.h = encoder_output
-    decoder = Decoder()
-
-    attention.forward(decoder.h_prev_0)
-
-
+    attention.h = encoder_output #attention.h.Size([input length, batch, encoder output units])
+    max_output_time_length = 30
+    decoder = Decoder(max_output_time_length=max_output_time_length)
+    h_prev_1 = decoder.h_prev_1
+    stop_token_cum = decoder.stop_token_cum
+    for decoder_step in range(max_output_time_length):
+        print('\n---------------------', 'decoder step: ', decoder_step + 1)
+        context_vector = attention.forward(h_prev_1, stop_token_cum)
+        h_prev_1, stop_token_cum = decoder.forward(context_vector)
+        if not any(stop_token_cum): # stop decoding if no further prediction is needed for any samples in batch
+            break
 
 checkup()
 
