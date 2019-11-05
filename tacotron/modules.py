@@ -5,7 +5,6 @@ import torch.nn.functional as F
 from common.layers import *
 import hparams
 
-
 class CharacterEmbedding(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, pretrained_embedding=None, initial_weights=None):
         '''
@@ -70,16 +69,16 @@ class ARSG(nn.Module):
             Size([batch_size, input_time_length, dim_f])
         """
         F_matrix = F_matrix.unsqueeze(0).unsqueeze(1)  # (minibatch,in_channels,iH,iW)
-        print('F_matrix shape: ', F_matrix.size())
+        # print('F_matrix shape: ', F_matrix.size())
         a_prev = a_prev.unsqueeze(1).unsqueeze(3)  # (out_channels, in_channel/1, kH,kW)
-        print('a_prev shape: ', a_prev.size())
+        # print('a_prev shape: ', a_prev.size())
         padding = (a_prev.shape[2]-1)//2 # SAME padding # (k-1)/2
         f_current = torch.conv2d(input=F_matrix, weight=a_prev, stride=1, padding=[padding, 0]) # (minibatch, out_channels, iH, iW)
-        print('f_current shape: ', f_current.size())
+        # print('f_current shape: ', f_current.size())
         f_current = f_current.squeeze(0)
         if f_current.size()[1] != F_matrix.size()[3]: # if time length shrinked due to padding
             f_current = F.pad(f_current, [0, 0, 1, 0], mode='constant', value=0)
-        print('f_current reshape: ', f_current.size())
+        # print('f_current reshape: ', f_current.size())
         return f_current
 
     def score(self, s_prev, h, f_current):
@@ -142,12 +141,12 @@ class ARSG(nn.Module):
         return a_current
 
 class LocationSensitiveAttention(nn.Module):
-    def __init__(self, batch_size, decoder_rnn_units, encoder_output_units, dim_f, dim_w, F_matrix, max_input_time_length, max_output_time_length, mode='sharpening', beta=1.0):
+    def __init__(self, batch_size, decoder_rnn_units, encoder_output_units, dim_f, dim_w, max_input_time_length, max_output_time_length, mode='sharpening', beta=1.0):
         super(LocationSensitiveAttention, self).__init__()
         self.ARSG = ARSG(decoder_rnn_units, encoder_output_units, dim_f, dim_w)
         self.alignments = torch.zeros([batch_size, max_input_time_length, max_output_time_length], requires_grad=False) # Preserves alignments history
         self.decoder_time_step = 0
-        self.F_matrix = F_matrix
+        self.F_matrix = nn.Parameter(torch.rand([max_input_time_length, dim_f], requires_grad=True)) # Size([input_time_length, dim_f])
         self.mode = mode
         self.beta = beta
 
@@ -211,15 +210,21 @@ class Encoder(nn.Module):
                               num_layers=encoder_rnn_layers,
                               bias=True,
                               dropout=encoder_rnn_dropout,
-                              bidirectional=True) # returns output.size([num_embeddings, batch_size, 2(bidirection)*hidden_size): stack of output states, h_n.size([2(bidirection)*num_layers, batch_size, hidden_size]): last hidden state
-        self.layers = nn.Sequential(
-            self.character_embedding,
-            self.conv_layers,
-            self.rnn
-        )
+                              bidirectional=True)  # returns output.size([num_embeddings, batch_size, 2(bidirection)*hidden_size): stack of output states, h_n.size([2(bidirection)*num_layers, batch_size, hidden_size]): last hidden state
 
-    def forward(self, input_text):
-        return self.layers(input_text)
+    def forward(self, input_character_indices):
+        # Encoder
+        # Character embeddings
+        character_embeddings = self.character_embeddings(input_character_indices)
+        # Convolution layers
+        character_embeddings = character_embeddings.unsqueeze(1)
+        conv_embeddings = self.conv_layers(character_embeddings)
+        # RNN
+        conv_embeddings = conv_embeddings.squeeze(1).transpose(0,
+                                                               1)  # (max_input_length, batch, input_dim)
+        encoder_output, (encoder_h_n, encoder_c_n) = self.rnn(conv_embeddings)
+        return encoder_output, (encoder_h_n, encoder_c_n)
+
 
 class Decoder(nn.Module):
     def __init__(self,
@@ -288,12 +293,21 @@ class Decoder(nn.Module):
             activation_list=decoder_prenet_activation_list
         )
 
-        # reset
         self.decoder_prenet_in_features = decoder_prenet_in_features
         self.decoder_rnn_units = decoder_rnn_units
         self.max_output_time_length = max_output_time_length
         self.num_mel_channels = num_mel_channels
-        self.reset(batch_size)
+
+        # Reset batch params
+        self.frame_prev = torch.zeros([batch_size, self.decoder_prenet_in_features])  # Initial go-frame
+        self.h_prev_0 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial hidden state
+        self.c_prev_0 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial cell state
+        self.h_prev_1 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial hidden state
+        self.c_prev_1 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial cell state
+
+        self.spectrogram_pred = torch.zeros([batch_size, self.max_output_time_length, self.num_mel_channels])
+        self.stop_token_cum = torch.ones(batch_size, dtype=torch.uint8)
+        self.decoder_time_step = 0
 
     def reset(self, batch_size):
         """
@@ -389,8 +403,7 @@ def checkup():
           '\t encoder last step hidden states: ', encoder_h_n.size(),
           '\t encoder last step cell states: ', encoder_c_n.size())
 
-    F_matrix = torch.rand([100, 128])
-    attention = LocationSensitiveAttention(32, 1024, 512, 128, 128, F_matrix, 100, 1024)
+    attention = LocationSensitiveAttention(32, 1024, 512, 128, 128, 100, 1024)
     attention.h = encoder_output #attention.h.Size([input length, batch, encoder output units])
     max_output_time_length = 30
     decoder = Decoder(max_output_time_length=max_output_time_length)

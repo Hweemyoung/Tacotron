@@ -5,17 +5,13 @@ import tqdm.tqdm
 
 import tacotron.modules
 
+
 class Tacotron2(nn.Module):
-    def __init__(self):
+    def __init__(self, *args):
         super(Tacotron2, self).__init__()
-        self.encoder = tacotron.modules.Encoder()
-        self.attention = tacotron.modules.LocationSensitiveAttention()
-        self.decoder = tacotron.modules.Decoder()
-        self.net = nn.Sequential([
-            self.encoder,
-            self.attention,
-            self.decoder
-        ])
+        self.encoder = tacotron.modules.Encoder(*args)
+        self.attention = tacotron.modules.LocationSensitiveAttention(*args)
+        self.decoder = tacotron.modules.Decoder(*args)
 
     def train(self, dataloaders_dict, criterion, optimizer, num_epochs=100):
         # 1. set device
@@ -36,27 +32,42 @@ class Tacotron2(nn.Module):
                 epoch_correct = 0
 
                 # 7. iterate dataloader
-                for inputs, labels in tqdm(dataloaders_dict[phase]):  # dataloader는 자체로 iterable
+                for input_character_indices, spectrogram_labels in tqdm(
+                        dataloaders_dict[phase]):  # dataloader는 자체로 iterable
                     # 8. dataset to device
-                    inputs = inputs.to(device)
-                    labels = labels.to(device)
+                    input_character_indices = input_character_indices.to(device)
+                    spectrogram_labels = spectrogram_labels.to(device)
 
                     # 9. initialize grad
                     optimizer.zero_grad()
 
                     # 10. forward
-                    with torch.set_grad_enabled(mode=(phase == 'train')):  # enable grad only when training # with + context_manager
-                        outputs = self.net(inputs)
-                        loss = criterion(outputs, labels)
+                    with torch.set_grad_enabled(
+                            mode=(phase == 'train')):  # enable grad only when training # with + context_manager
+                        # Encoder
+                        encoder_output, (encoder_h_n, encoder_c_n) = self.encoder.forward(input_character_indices)
+                        # Attention&Decoder
+                        self.attention.h = encoder_output  # attention.h.Size([input length, batch, encoder output units])
+                        self.decoder.reset(batch_size)
+                        h_prev_1, stop_token_cum = self.decoder.h_prev_1, self.decoder.stop_token_cum  # Local variable to speed up
+                        for decoder_step in range(self.decoder.max_output_time_length):
+                            print('\n---------------------', 'decoder step: ', decoder_step + 1)
+                            context_vector = self.attention.forward(h_prev_1, stop_token_cum)
+                            h_prev_1, stop_token_cum = self.decoder.forward(context_vector)
+                            if not any(stop_token_cum):  # stop decoding if no further prediction is needed for any samples in batch
+                                break
+
+                        # Calc loss
+                        loss = criterion(self.decoder.spectrogram_pred, spectrogram_labels)
 
                         # 11. (training)calc grad
                         if phase == 'train':
                             loss.backward()
-                            # 12. update parameters
+                            # 12. (training)update parameters
                             optimizer.step()
 
                         # 13. add loss and correct per minibatch per phase
-                        epoch_loss += loss.item() * inputs.size(0)
+                        epoch_loss += loss.item() * input_character_indices.size(0)
 
             # 14. print epoch summary
             epoch_loss /= len(dataloaders_dict[phase].dataset)  ## len(dataloader): num of datum
