@@ -5,13 +5,23 @@ import torch
 import torch.utils.data as data
 from tqdm import tqdm
 
-class TextMelLoader(data.dataloader):
-    def __init__(self):
+from tacotron.text import text_to_sequence
+
+class TextMelSet(data.Dataset):
+    def __init__(self, model_name, dataset_path, training_files, args):
         self.load_mel_from_disk = args.load_mel_from_disk
+        self.text_cleaners = args.text_cleaners
+        self.audio_paths = self
+
+    def __getitem__(self, index):
+        return self.get_mel_text_pair(self.audiopaths[index], self.text_list[index])
+
+    def __len__(self):
+        return len(self.audiopaths)
 
     def get_mel(self, audio_path):
         if self.mel_from_disk:
-            mel_spectrogram = torch.load(audio_path)
+            return torch.load(audio_path)
         else:
             sr, audio = wavfile.read(audio_path)
             audio = torch.FloatTensor(audio.astype(np.float32))
@@ -22,21 +32,29 @@ class TextMelLoader(data.dataloader):
             audio_norm = torch.autograd.Variable(audio_norm, requires_grad=False)
             mel_spectrogram = self.stft.mel_spectrogram(audio_norm)
             mel_spectrogram = mel_spectrogram.squeeze(0)
-        return mel_spectrogram
+            return mel_spectrogram
 
     def get_text(self, text):
         text_norm = torch.IntTensor(text_to_sequence(text, self.text_cleaners))
 
-    def text_to_sequence(self, text, text_cleaner):
+    def text_to_sequence(self, text, text_cleaner, _curly_re):
+        """ from https://github.com/keithito/tacotron """
         sequence = []
         while len(text):
+            m = _curly_re.match(text)
+            if not m:
+                sequence +=
 
-
+    def get_mel_text_pair(self, audio_path, text):
+        len_text = len(text)
+        text = self.get_text(text)
+        mel = self.get_mel(audio_path)
+        return (text, mel, len_text)
 
 def audio2mel(dataset_path, mel_paths, audio_paths):
     mel_paths_list = load_filepaths(dataset_path, mel_paths)
     audio_paths_list = load_filepaths(dataset_path, audio_paths)
-    text_mel_loader = TextMelLoader()
+    text_mel_loader = TextMelSet()
 
     for i in tqdm(range(len(mel_paths_list))):
         mel = text_mel_loader.get_mel(audio_paths_list[i][0])

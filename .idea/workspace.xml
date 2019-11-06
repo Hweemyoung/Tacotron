@@ -2,15 +2,16 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="0756d3e5-184e-4524-88b4-46ca0cf5732e" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/dictionaries/hweem.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/common/data_functions.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/settings.zip" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tacotron/data_functions.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/Tacotron.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/Tacotron.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/dictionaries/hweem.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/dictionaries/hweem.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tacotron/dataloader.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/dataloader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tacotron/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tacotron/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/models.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tacotron/modules.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/modules.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tacotron/dataloader.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/tacotron/preprocessor.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/preprocessor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/train.py" beforeDir="false" afterPath="$PROJECT_DIR$/train.py" afterDir="false" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
@@ -38,9 +39,10 @@
     <ConfirmationsSetting value="2" id="Add" />
   </component>
   <component name="PropertiesComponent">
+    <property name="ASKED_ADD_EXTERNAL_FILES" value="true" />
     <property name="SHARE_PROJECT_CONFIGURATION_FILES" value="true" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/../../DeepLearningExamples/PyTorch/SpeechSynthesis/Tacotron2/preprocess_audio2mel.py" />
-    <property name="settings.editor.selected.configurable" value="preferences.lookFeel" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/../../DeepLearningExamples/PyTorch/SpeechSynthesis/Tacotron2/tacotron2/data_function.py" />
+    <property name="settings.editor.selected.configurable" value="preferences.keymap" />
   </component>
   <component name="PyConsoleOptionsProvider">
     <option name="myPythonConsoleState">
@@ -124,6 +126,7 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
+    <option name="ADD_EXTERNAL_FILES_SILENTLY" value="true" />
     <MESSAGE value="Added preprocessor arg group.&#10;Not sure this is most right way of splitting groups.&#10;&#10;Started building Taco2." />
     <option name="LAST_COMMIT_MESSAGE" value="Added preprocessor arg group.&#10;Not sure this is most right way of splitting groups.&#10;&#10;Started building Taco2." />
   </component>
