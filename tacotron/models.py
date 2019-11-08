@@ -5,6 +5,11 @@ import tqdm.tqdm
 
 import tacotron.modules
 
+class Taco2ProsodyTransfer(nn.Module):
+    def __init__(self, *args):
+        super(Taco2ProsodyTransfer,self).__init__()
+        self.encoder = tacotron.modules.Encoder(*args)
+        self.attention = tacotron.modules.LocationSensitiveAttention
 
 class Tacotron2(nn.Module):
     def __init__(self, *args):
