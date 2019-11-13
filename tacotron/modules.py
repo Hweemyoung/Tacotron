@@ -327,9 +327,8 @@ class Decoder(nn.Module):
         self.c_prev_1 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial cell state
 
         self.spectrogram_pred = torch.zeros([batch_size, self.max_output_time_length, self.num_mel_channels])
-        self.stop_token_cum_prev = torch.ones(batch_size, dtype=torch.uint8)
+        self.spectrogram_length_pred = torch.zeros(batch_size, dtype=torch.uint8)
         self.stop_token_cum = torch.ones(batch_size, dtype=torch.uint8)
-        self.spectrogram_length_pred = torch.empty(batch_size, dtype=torch.uint8)
         self.decoder_time_step = 0
 
     def reset(self, batch_size):
@@ -345,9 +344,8 @@ class Decoder(nn.Module):
         self.c_prev_1 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial cell state
 
         self.spectrogram_pred = torch.zeros([batch_size, self.max_output_time_length, self.num_mel_channels])
-        self.stop_token_cum_prev = torch.ones(batch_size, dtype=torch.uint8)
-        self.stop_token_cum = torch.ones(batch_size, dtype=torch.uint8)
         self.spectrogram_length_pred = torch.ones(batch_size, dtype=torch.uint8)
+        self.stop_token_cum = torch.ones(batch_size, dtype=torch.uint8)
         self.decoder_time_step = 0
 
     def forward(self, context_vector):
@@ -359,36 +357,34 @@ class Decoder(nn.Module):
         :return _stop_token: 1-d Tensor
             Size([batch_size])
         """
-        stop_token_cum_prev = self.stop_token_cum_prev
-        stop_token_cum = self.stop_token_cum
+        stop_token_cum_prev = self.stop_token_cum.clone()
         # 1.Prenet
-        self.frame_prev = self.prenet(self.frame_prev)  # Size([batch_size, decoder_prenet_out_features])
+        self.frame_prev = self.prenet(self.frame_prev)  # Size([valid_batch_size, decoder_prenet_out_features])
         # 2.LSTMs
-        h_prev_0 = self.h_prev_0[stop_token_cum]
-        h_prev_1 = self.h_prev_1[stop_token_cum]
-        c_prev_0 = self.c_prev_0[stop_token_cum]
-        c_prev_1 = self.c_prev_1[stop_token_cum]
+        h_prev_0 = self.h_prev_0[stop_token_cum_prev]
+        h_prev_1 = self.h_prev_1[stop_token_cum_prev]
+        c_prev_0 = self.c_prev_0[stop_token_cum_prev]
+        c_prev_1 = self.c_prev_1[stop_token_cum_prev]
         _input = torch.cat([self.frame_prev, context_vector],
-                           dim=1)  # Size([batch_size, encoder_output_units+decoder_prenet_in_features])
+                           dim=1)  # Size([valid_batch_size, encoder_output_units+decoder_prenet_in_features])
 
         (h_prev_0, c_prev_0) = self.lstm_cell_0(_input, (h_prev_0, c_prev_0))
-        self.h_prev_0[stop_token_cum] = h_prev_0
-        self.c_prev_0[stop_token_cum] = c_prev_0
+        self.h_prev_0[stop_token_cum_prev] = h_prev_0
+        self.c_prev_0[stop_token_cum_prev] = c_prev_0
 
         (h_prev_1, c_prev_1) = self.lstm_cell_1(h_prev_0, (h_prev_1, c_prev_1))
-        self.h_prev_1[stop_token_cum] = h_prev_1
-        self.c_prev_1[stop_token_cum] = c_prev_1
+        self.h_prev_1[stop_token_cum_prev] = h_prev_1
+        self.c_prev_1[stop_token_cum_prev] = c_prev_1
 
         # 3.Linear projection for mel
         _input = torch.cat([h_prev_1, context_vector], dim=1)
-        _frame_curr = self.linear_projection_mel(_input)  # Size([batch_size, num_mel_channels])
-        self.frame_prev = _frame_curr
+        _frame_curr = self.linear_projection_mel(_input)  # Size([valid_batch_size, num_mel_channels])
         # 4.Post-Net and add
-        _frame_curr = _frame_curr.unsqueeze(1).unsqueeze(3)  # Size([batch_size, 1, num_mel_channels, 1])
-        _frame_curr = _frame_curr + self.postnet(_frame_curr)  # Size([batch_size, 1, num_mel_channels, 1])
-        _frame_curr = _frame_curr.squeeze(3).squeeze(1)  # Size([batch_size, num_mel_channels])
+        _frame_curr = _frame_curr.unsqueeze(1).unsqueeze(3)  # Size([valid_batch_size, 1, num_mel_channels, 1])
+        _frame_curr = _frame_curr + self.postnet(_frame_curr)  # Size([valid_batch_size, 1, num_mel_channels, 1])
+        _frame_curr = _frame_curr.squeeze(3).squeeze(1)  # Size([valid_batch_size, num_mel_channels])
         # 5.Store predicted frame
-        self.spectrogram_pred[stop_token_cum, self.decoder_time_step, :] = _frame_curr
+        self.spectrogram_pred[stop_token_cum_prev, self.decoder_time_step, :] = _frame_curr
         # 6.Linear projection for stop token
         _stop_token = self.linear_projection_stop(_input)  # Size([valid_batch_size, 1])
         _stop_token = _stop_token.squeeze(1)  # Size([valid_batch_size])
@@ -396,10 +392,9 @@ class Decoder(nn.Module):
         # 7. Update valid cases for further prediction
         self.stop_token_cum[self.stop_token_cum == 1] = _stop_token  # Update stop token among still valid cases
         # 8. Update spectrogram length predictions.
-        self.spectrogram_length_pred[(stop_token_cum_prev != self.stop_token_cum).nonzero().squeeze()] = self.decoder_time_step
+        self.spectrogram_length_pred[(stop_token_cum_prev != self.stop_token_cum).nonzero().squeeze()] = self.decoder_time_step + 1
 
-        self.frame_prev = self.frame_prev[_stop_token]  # Return newly valid cases only
-        self.stop_token_cum_prev = self.stop_token_cum
+        self.frame_prev = _frame_curr[_stop_token]  # Return newly valid cases only
         self.decoder_time_step += 1
         return self.h_prev_1, self.stop_token_cum
 
@@ -446,5 +441,10 @@ def checkup():
         h_prev_1, stop_token_cum = decoder.forward(context_vector)
         if not any(stop_token_cum):  # stop decoding if no further prediction is needed for any samples in batch
             break
+    return decoder.spectrogram_pred, decoder.spectrogram_length_pred
+
+pred, length_pred = checkup()
+print(pred)
+print(length_pred)
 
 # parser = hparams.parser
