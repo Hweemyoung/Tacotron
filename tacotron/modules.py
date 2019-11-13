@@ -148,15 +148,23 @@ class ARSG(nn.Module):
 
 
 class LocationSensitiveAttention(nn.Module):
-    def __init__(self, batch_size, decoder_rnn_units, encoder_output_units, dim_f, dim_w, max_input_time_length,
-                 max_output_time_length, mode='sharpening', beta=1.0):
+    def __init__(self,
+                 batch_size=32,
+                 decoder_rnn_units=1024,
+                 encoder_output_units=512,
+                 dim_f=128,
+                 dim_w=128,
+                 max_input_time_length=100,
+                 max_output_time_length=1024,
+                 mode='sharpening',
+                 beta=1.0):
         super(LocationSensitiveAttention, self).__init__()
         self.ARSG = ARSG(decoder_rnn_units, encoder_output_units, dim_f, dim_w)
         self.alignments = torch.empty([batch_size, max_input_time_length, max_output_time_length],
                                       requires_grad=False)  # Preserves alignments history
         self.decoder_time_step = 0
         self.F_matrix = nn.Parameter(
-            nn.init.xavier_uniform_([max_input_time_length, dim_f]))  # Size([input_time_length, dim_f])
+            nn.init.xavier_uniform_(torch.empty([max_input_time_length, dim_f])))  # Size([input_time_length, dim_f])
         self.mode = mode
         self.beta = beta
 
@@ -319,7 +327,9 @@ class Decoder(nn.Module):
         self.c_prev_1 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial cell state
 
         self.spectrogram_pred = torch.zeros([batch_size, self.max_output_time_length, self.num_mel_channels])
+        self.stop_token_cum_prev = torch.ones(batch_size, dtype=torch.uint8)
         self.stop_token_cum = torch.ones(batch_size, dtype=torch.uint8)
+        self.spectrogram_length_pred = torch.empty(batch_size, dtype=torch.uint8)
         self.decoder_time_step = 0
 
     def reset(self, batch_size):
@@ -335,7 +345,9 @@ class Decoder(nn.Module):
         self.c_prev_1 = torch.zeros([batch_size, self.decoder_rnn_units])  # Initial cell state
 
         self.spectrogram_pred = torch.zeros([batch_size, self.max_output_time_length, self.num_mel_channels])
+        self.stop_token_cum_prev = torch.ones(batch_size, dtype=torch.uint8)
         self.stop_token_cum = torch.ones(batch_size, dtype=torch.uint8)
+        self.spectrogram_length_pred = torch.ones(batch_size, dtype=torch.uint8)
         self.decoder_time_step = 0
 
     def forward(self, context_vector):
@@ -347,6 +359,7 @@ class Decoder(nn.Module):
         :return _stop_token: 1-d Tensor
             Size([batch_size])
         """
+        stop_token_cum_prev = self.stop_token_cum_prev
         stop_token_cum = self.stop_token_cum
         # 1.Prenet
         self.frame_prev = self.prenet(self.frame_prev)  # Size([batch_size, decoder_prenet_out_features])
@@ -376,16 +389,19 @@ class Decoder(nn.Module):
         _frame_curr = _frame_curr.squeeze(3).squeeze(1)  # Size([batch_size, num_mel_channels])
         # 5.Store predicted frame
         self.spectrogram_pred[stop_token_cum, self.decoder_time_step, :] = _frame_curr
-        self.decoder_time_step += 1
         # 6.Linear projection for stop token
-        _stop_token = self.linear_projection_stop(_input)  # Size([batch_size, 1])
-        _stop_token = _stop_token.squeeze(1)  # Size([batch_size])
+        _stop_token = self.linear_projection_stop(_input)  # Size([valid_batch_size, 1])
+        _stop_token = _stop_token.squeeze(1)  # Size([valid_batch_size])
         _stop_token = _stop_token < .5  # (<0.5) -> valid, (>0.5) -> switch off)
         # 7. Update valid cases for further prediction
         self.stop_token_cum[self.stop_token_cum == 1] = _stop_token  # Update stop token among still valid cases
-        self.frame_prev = self.frame_prev[_stop_token]  # Return newly valid cases only
-        return self.h_prev_1, self.stop_token_cum
+        # 8. Update spectrogram length predictions.
+        self.spectrogram_length_pred[(stop_token_cum_prev != self.stop_token_cum).nonzero().squeeze()] = self.decoder_time_step
 
+        self.frame_prev = self.frame_prev[_stop_token]  # Return newly valid cases only
+        self.stop_token_cum_prev = self.stop_token_cum
+        self.decoder_time_step += 1
+        return self.h_prev_1, self.stop_token_cum
 
 def checkup():
     # check CharacterEmbedding
@@ -430,8 +446,5 @@ def checkup():
         h_prev_1, stop_token_cum = decoder.forward(context_vector)
         if not any(stop_token_cum):  # stop decoding if no further prediction is needed for any samples in batch
             break
-
-
-checkup()
 
 # parser = hparams.parser

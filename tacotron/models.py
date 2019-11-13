@@ -1,13 +1,13 @@
 import torch
 from torch import nn
 from torch import optim
-import tqdm.tqdm
+from tqdm import tqdm
 
-import tacotron.modules
+import tacotron.modules, tacotron.loss_function
 
 class Taco2ProsodyTransfer(nn.Module):
     def __init__(self, *args):
-        super(Taco2ProsodyTransfer,self).__init__()
+        super(Taco2ProsodyTransfer, self).__init__()
         self.encoder = tacotron.modules.Encoder(*args)
         self.attention = tacotron.modules.LocationSensitiveAttention
 
@@ -79,3 +79,14 @@ class Tacotron2(nn.Module):
 
             print('Epoch loss: {:.4f}'.format(epoch_loss))
 
+
+def checkup():
+    taco = Tacotron2()
+    criterion = tacotron.loss_function.Taco2Loss()
+    optimizer = torch.optim.Adam(Tacotron2.parameters())
+    taco.train(dataloaders_dict=,
+               criterion=criterion,
+               optimizer=optimizer,
+               num_epochs=3)
+
+checkup()

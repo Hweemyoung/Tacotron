@@ -93,8 +93,20 @@ class Conv2DSeq(nn.Module):
         super(Conv2DSeq, self).__init__()
         if type(kernel_size_list) == int:
             kernel_size_list = [kernel_size_list] * len(out_channels_list)
+        stride_list = stride_list
         if type(stride_list) == int:
             stride_list = [stride_list] * len(out_channels_list)
+        elif type(stride_list) in (list, tuple):
+            for i, stride in enumerate(stride_list):
+                if type(stride) == int:
+                    pass
+                elif type(stride) == list:
+                    stride_list[i] = tuple(stride)
+
+                if type(stride) in (tuple, list):
+                    assert len(stride) <= 2
+                else:
+                    raise ValueError('Argument not understood')
         if type(dropout_list) == float:
             dropout_list = [dropout_list] * len(out_channels_list)
         if type(batch_normalization_list) == bool:
