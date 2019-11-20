@@ -4,16 +4,16 @@ class Taco2Loss(nn.Module):
     def __init__(self):
         super(Taco2Loss, self).__init__()
 
-    def forward(self, preds, targets):
+    def forward(self, preds, labels):
         """
         :param preds: Tuple
             (spectrogram_pred, stop_tokens_cum)
-        :param targets: Tuple
+        :param labels: Tuple
             (spectrogram_label, stop_tokens_label)
         :return:
         """
         (spectrogram_pred, spectrogram_length_pred) = preds
-        (spectrogram_label, spectrogram_length_label) = targets
+        (spectrogram_label, spectrogram_length_label) = labels
 
         spectrogram_label.requires_grad = False
         spectrogram_length_label.requires_grad = False

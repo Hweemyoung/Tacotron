@@ -29,6 +29,19 @@ class LinearSeq(nn.Module):
         return x
 
 
+def transpose(x, dim0, dim1):
+    '''
+    Adaptive transpose function.
+    :param x: Tensor
+    :param dim0: int
+    :param dim1: int
+    :return: Tensor
+    '''
+    if max(dim0, dim1) < x.dim():
+        return x.transpose(dim0, dim1)
+    else:
+        return x
+
 class TransposeNorm(nn.Module):
     def __init__(self, dim0, dim1):
         super(TransposeNorm, self).__init__()
@@ -48,14 +61,17 @@ class BatchNorm1d(nn.Module):
         self.layer = nn.BatchNorm1d(out_features)
 
     def forward(self, x):
-        if x.size()[0] == 1:
+        x = transpose(x, 1, 2)
+        if x.size(0) == 1:  # Sample size == 1
             if x.dim() == 2:
                 x = x.unsqueeze(2)
             x = F.instance_norm(x)
             x = x.squeeze(2)
+            x = transpose(x, 1, 2)
             return x
         else:
-            return self.layer(x)
+            x = self.layer(x)
+            return transpose(x, 1, 2)
 
 
 class LinearNorm(nn.Module):
@@ -65,9 +81,9 @@ class LinearNorm(nn.Module):
         self.layers.append(
             nn.Linear(in_features, out_features, bias))  # Returns Size([batch_size(, time length), out_features])
         if batch_normalization:
-            self.layers.append(TransposeNorm(1, 2))  # Returns Size([batch_size, out_features(, time length)])
+            #self.layers.append(TransposeNorm(1, 2))  # Returns Size([batch_size, out_features(, time length)])
             self.layers.append(BatchNorm1d(out_features))  # Returns Size([batch_size, out_features(, time length)])
-            self.layers.append(TransposeNorm(1, 2))  # Returns Size([batch_size(, time length), out_features])
+            #self.layers.append(TransposeNorm(1, 2))  # Returns Size([batch_size(, time length), out_features])
         if activation == 'relu':
             self.layers.append(nn.ReLU())
         elif activation == 'tanh':

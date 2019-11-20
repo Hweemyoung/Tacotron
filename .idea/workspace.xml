@@ -3,6 +3,9 @@
   <component name="ChangeListManager">
     <list default="true" id="0756d3e5-184e-4524-88b4-46ca0cf5732e" name="Default Changelist" comment="Added preprocessor arg group.&#10;Not sure this is most right way of splitting groups.&#10;&#10;Started building Taco2.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/common/layers.py" beforeDir="false" afterPath="$PROJECT_DIR$/common/layers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tacotron/loss_function.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/loss_function.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tacotron/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tacotron/modules.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/modules.py" afterDir="false" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
@@ -55,7 +58,7 @@
       </list>
     </option>
   </component>
-  <component name="RunManager" selected="Python.modules">
+  <component name="RunManager" selected="Python.models">
     <configuration name="models" type="PythonConfigurationType" factoryName="Python" temporary="true">
       <module name="Tacotron" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -100,8 +103,8 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.modules" />
         <item itemvalue="Python.models" />
+        <item itemvalue="Python.modules" />
       </list>
     </recent_temporary>
   </component>
@@ -156,19 +159,9 @@
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/tacotron/models.py</url>
-          <line>91</line>
-          <option name="timeStamp" value="1" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/tacotron/modules.py</url>
-          <line>445</line>
-          <option name="timeStamp" value="2" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/tacotron/modules.py</url>
-          <line>436</line>
-          <option name="timeStamp" value="5" />
+          <line>459</line>
+          <option name="timeStamp" value="6" />
         </line-breakpoint>
       </breakpoints>
       <default-breakpoints>

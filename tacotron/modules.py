@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from tacotron.loss_function import Taco2Loss
 from common.layers import *
 import hparams
+
 
 class CharacterEmbeddings(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, pretrained_embeddings=None, initial_weights=None):
@@ -15,15 +17,15 @@ class CharacterEmbeddings(nn.Module):
         '''
         super(CharacterEmbeddings, self).__init__()
         if pretrained_embeddings:
-            self.character_embedding = nn.Embedding.from_pretrained(
+            self.character_embeddings = nn.Embedding.from_pretrained(
                 embeddings=pretrained_embeddings, freeze=True)
         elif initial_weights:
-            self.character_embedding = nn.Embedding(num_embeddings=num_embeddings,
-                                                    embedding_dim=embedding_dim,
-                                                    _weight=initial_weights)
+            self.character_embeddings = nn.Embedding(num_embeddings=num_embeddings,
+                                                     embedding_dim=embedding_dim,
+                                                     _weight=initial_weights)
         else:
-            self.character_embedding = nn.Embedding(num_embeddings=num_embeddings,
-                                                    embedding_dim=embedding_dim)
+            self.character_embeddings = nn.Embedding(num_embeddings=num_embeddings,
+                                                     embedding_dim=embedding_dim)
 
     def forward(self, input_indices):
         '''
@@ -32,7 +34,7 @@ class CharacterEmbeddings(nn.Module):
         :return: 3-d LongTensor
             Size([batch_size, max_input_length, embedding_dim])
         '''
-        return self.character_embedding(input_indices)
+        return self.character_embeddings(input_indices)
 
 
 class ConvLayers(nn.Module):
@@ -76,8 +78,8 @@ class ARSG(nn.Module):
         F_matrix = F_matrix.unsqueeze(0).unsqueeze(1)  # (minibatch,in_channels,iH,iW)
         # print('F_matrix shape: ', F_matrix.size())
         a_prev = a_prev.unsqueeze(1).unsqueeze(3)  # (out_channels, in_channel/1, kH,kW)
-        # print('a_prev shape: ', a_prev.size())
-        padding = (a_prev.shape[2] - 1) // 2  # SAME padding # (k-1)/2
+        print('a_prev shape: ', a_prev.size())
+        padding = (a_prev.size(2) - 1) // 2  # SAME padding # (k-1)/2
         f_current = torch.conv2d(input=F_matrix, weight=a_prev, stride=1,
                                  padding=[padding, 0])  # (minibatch, out_channels, iH, iW)
         # print('f_current shape: ', f_current.size())
@@ -149,7 +151,7 @@ class ARSG(nn.Module):
 
 class LocationSensitiveAttention(nn.Module):
     def __init__(self,
-                 batch_size=32,
+                 batch_size=4,
                  decoder_rnn_units=1024,
                  encoder_output_units=512,
                  dim_f=128,
@@ -213,10 +215,10 @@ class Encoder(nn.Module):
                  encoder_rnn_dropout=.5
                  ):
         super(Encoder, self).__init__()
-        self.character_embedding = CharacterEmbeddings(max_input_text_length,
-                                                       encoder_embedding_dim,
-                                                       pretrained_embedding,
-                                                       initial_weights)
+        self.character_embeddings = CharacterEmbeddings(max_input_text_length,
+                                                        encoder_embedding_dim,
+                                                        pretrained_embedding,
+                                                        initial_weights)
         self.conv_layers = ConvLayers(1,
                                       encoder_conv_out_channels_list,
                                       encoder_conv_kernel_size_list,
@@ -224,13 +226,12 @@ class Encoder(nn.Module):
                                       encoder_conv_dropout_list,
                                       encoder_conv_batch_normalization_list,
                                       encoder_conv_activation_list)
-        self.rnn = nn.RNNBase(mode='LSTM',
-                              input_size=encoder_conv_out_channels_list[-1] * encoder_embedding_dim,
-                              hidden_size=encoder_rnn_units,
-                              num_layers=encoder_rnn_layers,
-                              bias=True,
-                              dropout=encoder_rnn_dropout,
-                              bidirectional=True)  # returns output.size([num_embeddings, batch_size, 2(bidirection)*hidden_size): stack of output states, h_n.size([2(bidirection)*num_layers, batch_size, hidden_size]): last hidden state
+        self.rnn = nn.LSTM(input_size=encoder_conv_out_channels_list[-1] * encoder_embedding_dim,
+                           hidden_size=encoder_rnn_units,
+                           num_layers=encoder_rnn_layers,
+                           bias=True,
+                           dropout=encoder_rnn_dropout,
+                           bidirectional=True)  # returns output.size([num_embeddings, batch_size, 2(bidirection)*hidden_size): stack of output states, h_n.size([2(bidirection)*num_layers, batch_size, hidden_size]): last hidden state
 
     def forward(self, input_character_indices):
         # Encoder
@@ -238,6 +239,7 @@ class Encoder(nn.Module):
         character_embeddings = self.character_embeddings(input_character_indices)
         # Convolution layers
         character_embeddings = character_embeddings.unsqueeze(1)
+        print(character_embeddings.size())
         conv_embeddings = self.conv_layers(character_embeddings)
         # RNN
         conv_embeddings = conv_embeddings.squeeze(1).transpose(0,
@@ -248,7 +250,7 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
     def __init__(self,
-                 batch_size=32,
+                 batch_size=4,
                  encoder_output_units=512,
                  decoder_rnn_units=1024,
                  decoder_rnn_layers=2,
@@ -356,6 +358,8 @@ class Decoder(nn.Module):
             Size([batch_size, num_mel_channels])
         :return _stop_token: 1-d Tensor
             Size([batch_size])
+        :return self.h_prev_1: 1-d Tensor
+            Size([batch_size, decoder_rnn_units])
         """
         stop_token_cum_prev = self.stop_token_cum.clone()
         # 1.Prenet
@@ -379,24 +383,32 @@ class Decoder(nn.Module):
         # 3.Linear projection for mel
         _input = torch.cat([h_prev_1, context_vector], dim=1)
         _frame_curr = self.linear_projection_mel(_input)  # Size([valid_batch_size, num_mel_channels])
+
         # 4.Post-Net and add
         _frame_curr = _frame_curr.unsqueeze(1).unsqueeze(3)  # Size([valid_batch_size, 1, num_mel_channels, 1])
         _frame_curr = _frame_curr + self.postnet(_frame_curr)  # Size([valid_batch_size, 1, num_mel_channels, 1])
         _frame_curr = _frame_curr.squeeze(3).squeeze(1)  # Size([valid_batch_size, num_mel_channels])
+
         # 5.Store predicted frame
         self.spectrogram_pred[stop_token_cum_prev, self.decoder_time_step, :] = _frame_curr
+
         # 6.Linear projection for stop token
         _stop_token = self.linear_projection_stop(_input)  # Size([valid_batch_size, 1])
         _stop_token = _stop_token.squeeze(1)  # Size([valid_batch_size])
         _stop_token = _stop_token < .5  # (<0.5) -> valid, (>0.5) -> switch off)
+
         # 7. Update valid cases for further prediction
         self.stop_token_cum[self.stop_token_cum == 1] = _stop_token  # Update stop token among still valid cases
-        # 8. Update spectrogram length predictions.
-        self.spectrogram_length_pred[(stop_token_cum_prev != self.stop_token_cum).nonzero().squeeze()] = self.decoder_time_step + 1
 
-        self.frame_prev = _frame_curr[_stop_token]  # Return newly valid cases only
+        # 8. Update spectrogram length predictions.
+        self.spectrogram_length_pred[
+            (stop_token_cum_prev != self.stop_token_cum).nonzero().squeeze()] = self.decoder_time_step + 1
+
+        self.frame_prev = _frame_curr[_stop_token]  # Return newly valid cases only.
         self.decoder_time_step += 1
+
         return self.h_prev_1, self.stop_token_cum
+
 
 def checkup():
     # check CharacterEmbedding
@@ -433,18 +445,31 @@ def checkup():
     attention.h = encoder_output  # attention.h.Size([input length, batch, encoder output units])
     max_output_time_length = 30
     decoder = Decoder(max_output_time_length=max_output_time_length)
-    h_prev_1 = decoder.h_prev_1
-    stop_token_cum = decoder.stop_token_cum
+    h_prev_1 = decoder.h_prev_1.clone()
+    stop_token_cum = decoder.stop_token_cum.clone()
     for decoder_step in range(max_output_time_length):
         print('\n---------------------', 'decoder step: ', decoder_step + 1)
         context_vector = attention.forward(h_prev_1, stop_token_cum)
         h_prev_1, stop_token_cum = decoder.forward(context_vector)
         if not any(stop_token_cum):  # stop decoding if no further prediction is needed for any samples in batch
             break
-    return decoder.spectrogram_pred, decoder.spectrogram_length_pred
 
-pred, length_pred = checkup()
-print(pred)
-print(length_pred)
+    # Calc loss
+    length_pred_norm = decoder.spectrogram_length_pred.type(torch.float32) / max_output_time_length
+    preds = (decoder.spectrogram_pred, length_pred_norm)
+    labels = (
+    torch.rand_like(decoder.spectrogram_pred), torch.rand_like(decoder.spectrogram_length_pred.type(torch.float32)))
+    criterion = Taco2Loss()
+    loss = criterion.forward(preds, labels)
+
+    # Calc grad
+    loss.backward()
+
+    # Update params
+    optimizer = torch.optim.Adam()
+
+# pred, length_pred = checkup()
+# print(pred)
+# print(length_pred)
 
 # parser = hparams.parser
