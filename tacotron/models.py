@@ -42,14 +42,17 @@ class Tacotron2(nn.Module):
 
                 # 3.1 loop over batch
                 for batch in input_character_indices:
-                    # 3.1.0 initialize grads
+                    # 3.1.0 initialize grads and decoder attributes
                     optimizer.zero_grad()
+                    self.decoder.reset(batch_size)
+
+                    # 3.1.1 encoder
                     encoder_output, (encoder_h_n, encoder_c_n) = self.encoder(batch)
                     self.attention.h = encoder_output
                     h_prev_1 = self.decoder.h_prev_1.clone()
                     stop_token_cum = self.decoder.stop_token_cum.clone()
 
-                    # 3.1.1 loop over decoder step
+                    # 3.1.2 loop over decoder step
                     for decoder_step in range(self.decoder.max_output_time_length):
                         print('\n---------------------', 'decoder step: ', decoder_step + 1)
                         context_vector = self.attention.forward(h_prev_1, stop_token_cum)
@@ -58,19 +61,19 @@ class Tacotron2(nn.Module):
                                 stop_token_cum):  # stop decoding if no further prediction is needed for any samples in batch
                             break
 
-                    # 3.1.2 calc batch loss
+                    # 3.1.3 calc batch loss
                     length_pred_norm = self.decoder.spectrogram_length_pred.type(
                         torch.float32) / self.decoder.max_output_time_length
                     preds = (self.decoder.spectrogram_pred, length_pred_norm)
                     loss = criterion(preds, labels)
 
-                    # 3.1.3 calc grads
+                    # 3.1.4 calc grads
                     loss.backward()
 
-                    # 3.1.4 update model params
+                    # 3.1.5 update model params
                     optimizer.step()
 
-                    # 3.1.5 add batch loss to epoch loss
+                    # 3.1.6 add batch loss to epoch loss
                     epoch_loss += loss.item() * batch.size(0)
 
                 # 3.2 calc epoch loss
@@ -145,6 +148,5 @@ def checkup():
     taco.pseudo_train(criterion=criterion,
                       optimizer=optimizer,
                       num_epochs=3)
-
 
 checkup()

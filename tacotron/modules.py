@@ -78,7 +78,7 @@ class ARSG(nn.Module):
         F_matrix = F_matrix.unsqueeze(0).unsqueeze(1)  # (minibatch,in_channels,iH,iW)
         # print('F_matrix shape: ', F_matrix.size())
         a_prev = a_prev.unsqueeze(1).unsqueeze(3)  # (out_channels, in_channel/1, kH,kW)
-        print('a_prev shape: ', a_prev.size())
+        # print('a_prev shape: ', a_prev.size())
         padding = (a_prev.size(2) - 1) // 2  # SAME padding # (k-1)/2
         f_current = torch.conv2d(input=F_matrix, weight=a_prev, stride=1,
                                  padding=[padding, 0])  # (minibatch, out_channels, iH, iW)
@@ -185,14 +185,14 @@ class LocationSensitiveAttention(nn.Module):
         :return context_vector: 2-d Tensor.
             Size([batch_size, encoder_output_units])
         """
-        h = self.h[:, stop_token_cum, :]
-        s_prev = s_prev[stop_token_cum]
-        a_prev = self.a_prev[stop_token_cum]
+        h = self.h.data[:, stop_token_cum, :]
+        s_prev = s_prev.data[stop_token_cum]
+        a_prev = self.a_prev.data[stop_token_cum]
         a_current = self.ARSG.forward(self.F_matrix, a_prev, s_prev, h, self.mode,
                                       self.beta)  # Size([batch, input_time_length])
         context_vector = torch.bmm(a_current.unsqueeze(1), h.transpose(0, 1))  # Size([batch, 1, encoder_output_units])
         context_vector = context_vector.squeeze(1)  # Size([batch, encoder_output_units])
-        self.alignments[stop_token_cum, :, self.decoder_time_step] = a_current  # Store alignment
+        self.alignments.data[stop_token_cum, :, self.decoder_time_step] = a_current  # Store alignment
         self.a_prev[stop_token_cum] = a_current
         self.decoder_time_step += 1
         return context_vector
@@ -239,7 +239,6 @@ class Encoder(nn.Module):
         character_embeddings = self.character_embeddings(input_character_indices)
         # Convolution layers
         character_embeddings = character_embeddings.unsqueeze(1)
-        print(character_embeddings.size())
         conv_embeddings = self.conv_layers(character_embeddings)
         # RNN
         conv_embeddings = conv_embeddings.squeeze(1).transpose(0,
@@ -458,7 +457,7 @@ def checkup():
     length_pred_norm = decoder.spectrogram_length_pred.type(torch.float32) / max_output_time_length
     preds = (decoder.spectrogram_pred, length_pred_norm)
     labels = (
-    torch.rand_like(decoder.spectrogram_pred), torch.rand_like(decoder.spectrogram_length_pred.type(torch.float32)))
+        torch.rand_like(decoder.spectrogram_pred), torch.rand_like(decoder.spectrogram_length_pred.type(torch.float32)))
     criterion = Taco2Loss()
     loss = criterion.forward(preds, labels)
 

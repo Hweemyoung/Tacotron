@@ -3,8 +3,6 @@
   <component name="ChangeListManager">
     <list default="true" id="0756d3e5-184e-4524-88b4-46ca0cf5732e" name="Default Changelist" comment="Added preprocessor arg group.&#10;Not sure this is most right way of splitting groups.&#10;&#10;Started building Taco2.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/common/layers.py" beforeDir="false" afterPath="$PROJECT_DIR$/common/layers.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tacotron/loss_function.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/loss_function.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tacotron/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tacotron/modules.py" beforeDir="false" afterPath="$PROJECT_DIR$/tacotron/modules.py" afterDir="false" />
     </list>
@@ -160,8 +158,18 @@
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/tacotron/modules.py</url>
-          <line>459</line>
+          <line>458</line>
           <option name="timeStamp" value="6" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/tacotron/modules.py</url>
+          <line>189</line>
+          <option name="timeStamp" value="7" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/tacotron/models.py</url>
+          <line>144</line>
+          <option name="timeStamp" value="8" />
         </line-breakpoint>
       </breakpoints>
       <default-breakpoints>
